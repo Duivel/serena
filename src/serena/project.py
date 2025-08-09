@@ -279,6 +279,7 @@ class Project:
         ls_timeout: float | None = DEFAULT_TOOL_TIMEOUT - 5,
         trace_lsp_communication: bool = False,
         ls_specific_settings: dict[Language, Any] | None = None,
+        base_memory_path: str | None = None,
     ) -> SolidLanguageServer:
         """
         Create a language server for a project. Note that you will have to start it
@@ -291,6 +292,7 @@ class Project:
         :param trace_lsp_communication: whether to trace LSP communication
         :param ls_specific_settings: optional LS specific configuration of the language server,
             see docstrings in the inits of subclasses of SolidLanguageServer to see what values may be passed.
+        :param base_memory_path: custom base path for memory storage (cache, etc.)
         :return: the language server
         """
         ls_config = LanguageServerConfig(

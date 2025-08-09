@@ -26,7 +26,6 @@ from solidlsp.ls_config import Language, LanguageServerConfig
 from solidlsp.ls_exceptions import SolidLSPException
 from solidlsp.ls_handler import SolidLanguageServerHandler
 from solidlsp.ls_logger import LanguageServerLogger
-from solidlsp.ls_types import UnifiedSymbolInformation
 from solidlsp.ls_utils import FileUtils, PathUtils, TextUtils
 from solidlsp.lsp_protocol_handler import lsp_types
 from solidlsp.lsp_protocol_handler import lsp_types as LSPTypes
@@ -39,7 +38,8 @@ from solidlsp.lsp_protocol_handler.server import (
 )
 from solidlsp.settings import SolidLSPSettings
 
-GenericDocumentSymbol = Union[LSPTypes.DocumentSymbol, LSPTypes.SymbolInformation, ls_types.UnifiedSymbolInformation]
+GenericDocumentSymbol = Union[LSPTypes.DocumentSymbol,
+                              LSPTypes.SymbolInformation, ls_types.UnifiedSymbolInformation]
 
 
 @dataclasses.dataclass(kw_only=True)
@@ -75,7 +75,8 @@ class LSPFileBuffer:
     content_hash: str = ""
 
     def __post_init__(self):
-        self.content_hash = hashlib.md5(self.contents.encode("utf-8")).hexdigest()
+        self.content_hash = hashlib.md5(
+            self.contents.encode("utf-8")).hexdigest()
 
 
 class SolidLanguageServer(ABC):
@@ -107,7 +108,8 @@ class SolidLanguageServer(ABC):
         result = os.path.join(solidlsp_settings.ls_resources_dir, cls.__name__)
 
         # Migration of previously downloaded LS resources that were downloaded to a subdir of solidlsp instead of to the user's home
-        pre_migration_ls_resources_dir = os.path.join(os.path.dirname(__file__), "language_servers", "static", cls.__name__)
+        pre_migration_ls_resources_dir = os.path.join(os.path.dirname(
+            __file__), "language_servers", "static", cls.__name__)
         if os.path.exists(pre_migration_ls_resources_dir):
             if os.path.exists(result):
                 # if the directory already exists, we just remove the old resources
@@ -127,6 +129,7 @@ class SolidLanguageServer(ABC):
         repository_root_path: str,
         timeout: float | None = None,
         solidlsp_settings: SolidLSPSettings | None = None,
+        base_memory_path: str | None = None,
     ) -> "SolidLanguageServer":
         """
         Creates a language specific LanguageServer instance based on the given configuration, and appropriate settings for the programming language.
@@ -161,6 +164,7 @@ class SolidLanguageServer(ABC):
         process_launch_info: ProcessLaunchInfo,
         language_id: str,
         solidlsp_settings: SolidLSPSettings,
+        base_memory_path: str | None = None,
     ):
         """
         Initializes a LanguageServer instance.
@@ -174,10 +178,13 @@ class SolidLanguageServer(ABC):
                     This parameter is the command to launch the language server process.
                     The command must pass appropriate flags to the binary, so that it runs in the stdio mode,
                     as opposed to HTTP, TCP modes supported by some language servers.
+        :param base_memory_path: Custom base path for memory storage (cache, etc.)
         """
         self._solidlsp_settings = solidlsp_settings
         self.logger = logger
         self.repository_root_path: str = repository_root_path
+        # Initialize base_memory_path, will be set later if provided
+        self._base_memory_path: str | None = base_memory_path
         self.logger.log(
             f"Creating language server instance for {repository_root_path=} with {language_id=} and process launch info: {process_launch_info}",
             logging.DEBUG,
@@ -189,7 +196,8 @@ class SolidLanguageServer(ABC):
 
         # load cache first to prevent any racing conditions due to asyncio stuff
         self._document_symbols_cache: dict[
-            str, tuple[str, tuple[list[ls_types.UnifiedSymbolInformation], list[ls_types.UnifiedSymbolInformation]]]
+            str, tuple[str, tuple[list[ls_types.UnifiedSymbolInformation],
+                                  list[ls_types.UnifiedSymbolInformation]]]
         ] = {}
         """Maps file paths to a tuple of (file_content_hash, result_of_request_document_symbols)"""
         self._cache_lock = threading.Lock()
@@ -224,10 +232,12 @@ class SolidLanguageServer(ABC):
             # Normalize separators (pathspec expects forward slashes)
             pattern = pattern.replace(os.path.sep, "/")
             processed_patterns.append(pattern)
-        self.logger.log(f"Processing {len(processed_patterns)} ignored paths from the config", logging.DEBUG)
+        self.logger.log(
+            f"Processing {len(processed_patterns)} ignored paths from the config", logging.DEBUG)
 
         # Create a pathspec matcher from the processed patterns
-        self._ignore_spec = pathspec.PathSpec.from_lines(pathspec.patterns.GitWildMatchPattern, processed_patterns)
+        self._ignore_spec = pathspec.PathSpec.from_lines(
+            pathspec.patterns.GitWildMatchPattern, processed_patterns)
 
         self._server_context = None
         self._request_timeout: float | None = None
@@ -272,7 +282,8 @@ class SolidLanguageServer(ABC):
         """
         abs_path = os.path.join(self.repository_root_path, relative_path)
         if not os.path.exists(abs_path):
-            raise FileNotFoundError(f"File {abs_path} not found, the ignore check cannot be performed")
+            raise FileNotFoundError(
+                f"File {abs_path} not found, the ignore check cannot be performed")
 
         # Check file extension if it's a file
         is_file = os.path.isfile(abs_path)
@@ -302,10 +313,12 @@ class SolidLanguageServer(ABC):
         by explicitly closing all I/O pipes.
         """
         if not self.server.is_running():
-            self.logger.log("Server process not running, skipping shutdown.", logging.DEBUG)
+            self.logger.log(
+                "Server process not running, skipping shutdown.", logging.DEBUG)
             return
 
-        self.logger.log(f"Initiating final robust shutdown with a {timeout}s timeout...", logging.INFO)
+        self.logger.log(
+            f"Initiating final robust shutdown with a {timeout}s timeout...", logging.INFO)
         process = self.server.process
 
         # --- Main Shutdown Logic ---
@@ -317,40 +330,51 @@ class SolidLanguageServer(ABC):
             shutdown_thread = threading.Thread(target=self.server.shutdown)
             shutdown_thread.daemon = True
             shutdown_thread.start()
-            shutdown_thread.join(timeout=2.0)  # 2 second timeout for LSP shutdown
+            # 2 second timeout for LSP shutdown
+            shutdown_thread.join(timeout=2.0)
 
             if shutdown_thread.is_alive():
-                self.logger.log("LSP shutdown request timed out, proceeding to terminate...", logging.DEBUG)
+                self.logger.log(
+                    "LSP shutdown request timed out, proceeding to terminate...", logging.DEBUG)
             else:
-                self.logger.log("LSP shutdown request completed.", logging.DEBUG)
+                self.logger.log(
+                    "LSP shutdown request completed.", logging.DEBUG)
 
             if process.stdin and not process.stdin.is_closing():
                 process.stdin.close()
             self.logger.log("Stage 1 shutdown complete.", logging.DEBUG)
         except Exception as e:
-            self.logger.log(f"Exception during graceful shutdown: {e}", logging.DEBUG)
+            self.logger.log(
+                f"Exception during graceful shutdown: {e}", logging.DEBUG)
             # Ignore errors here, we are proceeding to terminate anyway.
 
         # Stage 2: Terminate and Wait for Process to Exit
-        self.logger.log(f"Terminating process {process.pid}, current status: {process.poll()}", logging.DEBUG)
+        self.logger.log(
+            f"Terminating process {process.pid}, current status: {process.poll()}", logging.DEBUG)
         process.terminate()
 
         # Stage 3: Wait for process termination with timeout
         try:
-            self.logger.log(f"Waiting for process {process.pid} to terminate...", logging.DEBUG)
+            self.logger.log(
+                f"Waiting for process {process.pid} to terminate...", logging.DEBUG)
             exit_code = process.wait(timeout=timeout)
-            self.logger.log(f"Language server process terminated successfully with exit code {exit_code}.", logging.INFO)
+            self.logger.log(
+                f"Language server process terminated successfully with exit code {exit_code}.", logging.INFO)
         except subprocess.TimeoutExpired:
             # If termination failed, forcefully kill the process
-            self.logger.log(f"Process {process.pid} termination timed out, killing process forcefully...", logging.WARNING)
+            self.logger.log(
+                f"Process {process.pid} termination timed out, killing process forcefully...", logging.WARNING)
             process.kill()
             try:
                 exit_code = process.wait(timeout=2.0)
-                self.logger.log(f"Language server process killed successfully with exit code {exit_code}.", logging.INFO)
+                self.logger.log(
+                    f"Language server process killed successfully with exit code {exit_code}.", logging.INFO)
             except subprocess.TimeoutExpired:
-                self.logger.log(f"Process {process.pid} could not be killed within timeout.", logging.ERROR)
+                self.logger.log(
+                    f"Process {process.pid} could not be killed within timeout.", logging.ERROR)
         except Exception as e:
-            self.logger.log(f"Error during process shutdown: {e}", logging.ERROR)
+            self.logger.log(
+                f"Error during process shutdown: {e}", logging.ERROR)
 
     @contextmanager
     def start_server(self) -> Iterator["SolidLanguageServer"]:
@@ -380,7 +404,8 @@ class SolidLanguageServer(ABC):
             )
             raise SolidLSPException("Language Server not started")
 
-        absolute_file_path = str(PurePath(self.repository_root_path, relative_file_path))
+        absolute_file_path = str(
+            PurePath(self.repository_root_path, relative_file_path))
         uri = pathlib.Path(absolute_file_path).as_uri()
 
         if uri in self.open_file_buffers:
@@ -394,7 +419,8 @@ class SolidLanguageServer(ABC):
             contents = FileUtils.read_file(self.logger, absolute_file_path)
 
             version = 0
-            self.open_file_buffers[uri] = LSPFileBuffer(uri, contents, version, self.language_id, 1)
+            self.open_file_buffers[uri] = LSPFileBuffer(
+                uri, contents, version, self.language_id, 1)
 
             self.server.notify.did_open_text_document(
                 {
@@ -436,7 +462,8 @@ class SolidLanguageServer(ABC):
             )
             raise SolidLSPException("Language Server not started")
 
-        absolute_file_path = str(PurePath(self.repository_root_path, relative_file_path))
+        absolute_file_path = str(
+            PurePath(self.repository_root_path, relative_file_path))
         uri = pathlib.Path(absolute_file_path).as_uri()
 
         # Ensure the file is open
@@ -445,7 +472,8 @@ class SolidLanguageServer(ABC):
         file_buffer = self.open_file_buffers[uri]
         file_buffer.version += 1
 
-        new_contents, new_l, new_c = TextUtils.insert_text_at_position(file_buffer.contents, line, column, text_to_be_inserted)
+        new_contents, new_l, new_c = TextUtils.insert_text_at_position(
+            file_buffer.contents, line, column, text_to_be_inserted)
         file_buffer.contents = new_contents
         self.server.notify.did_change_text_document(
             {
@@ -482,7 +510,8 @@ class SolidLanguageServer(ABC):
             )
             raise SolidLSPException("Language Server not started")
 
-        absolute_file_path = str(PurePath(self.repository_root_path, relative_file_path))
+        absolute_file_path = str(
+            PurePath(self.repository_root_path, relative_file_path))
         uri = pathlib.Path(absolute_file_path).as_uri()
 
         # Ensure the file is open
@@ -491,7 +520,8 @@ class SolidLanguageServer(ABC):
         file_buffer = self.open_file_buffers[uri]
         file_buffer.version += 1
         new_contents, deleted_text = TextUtils.delete_text_between_positions(
-            file_buffer.contents, start_line=start["line"], start_col=start["character"], end_line=end["line"], end_col=end["character"]
+            file_buffer.contents, start_line=start["line"], start_col=start[
+                "character"], end_line=end["line"], end_col=end["character"]
         )
         file_buffer.contents = new_contents
         self.server.notify.did_change_text_document(
@@ -538,7 +568,8 @@ class SolidLanguageServer(ABC):
                 DefinitionParams,
                 {
                     LSPConstants.TEXT_DOCUMENT: {
-                        LSPConstants.URI: pathlib.Path(str(PurePath(self.repository_root_path, relative_file_path))).as_uri()
+                        LSPConstants.URI: pathlib.Path(
+                            str(PurePath(self.repository_root_path, relative_file_path))).as_uri()
                     },
                     LSPConstants.POSITION: {
                         LSPConstants.LINE: line,
@@ -556,14 +587,18 @@ class SolidLanguageServer(ABC):
                 if LSPConstants.URI in item and LSPConstants.RANGE in item:
                     new_item: ls_types.Location = {}
                     new_item.update(item)
-                    new_item["absolutePath"] = PathUtils.uri_to_path(new_item["uri"])
-                    new_item["relativePath"] = PathUtils.get_relative_path(new_item["absolutePath"], self.repository_root_path)
+                    new_item["absolutePath"] = PathUtils.uri_to_path(
+                        new_item["uri"])
+                    new_item["relativePath"] = PathUtils.get_relative_path(
+                        new_item["absolutePath"], self.repository_root_path)
                     ret.append(ls_types.Location(new_item))
                 elif LSPConstants.TARGET_URI in item and LSPConstants.TARGET_RANGE in item and LSPConstants.TARGET_SELECTION_RANGE in item:
                     new_item: ls_types.Location = {}
                     new_item["uri"] = item[LSPConstants.TARGET_URI]
-                    new_item["absolutePath"] = PathUtils.uri_to_path(new_item["uri"])
-                    new_item["relativePath"] = PathUtils.get_relative_path(new_item["absolutePath"], self.repository_root_path)
+                    new_item["absolutePath"] = PathUtils.uri_to_path(
+                        new_item["uri"])
+                    new_item["relativePath"] = PathUtils.get_relative_path(
+                        new_item["absolutePath"], self.repository_root_path)
                     new_item["range"] = item[LSPConstants.TARGET_SELECTION_RANGE]
                     ret.append(ls_types.Location(**new_item))
                 else:
@@ -576,7 +611,8 @@ class SolidLanguageServer(ABC):
             new_item: ls_types.Location = {}
             new_item.update(response)
             new_item["absolutePath"] = PathUtils.uri_to_path(new_item["uri"])
-            new_item["relativePath"] = PathUtils.get_relative_path(new_item["absolutePath"], self.repository_root_path)
+            new_item["relativePath"] = PathUtils.get_relative_path(
+                new_item["absolutePath"], self.repository_root_path)
             ret.append(ls_types.Location(**new_item))
         elif response is None:
             # Some language servers return None when they cannot find a definition
@@ -627,7 +663,8 @@ class SolidLanguageServer(ABC):
 
         with self.open_file(relative_file_path):
             try:
-                response = self._send_references_request(relative_file_path, line=line, column=column)
+                response = self._send_references_request(
+                    relative_file_path, line=line, column=column)
             except Exception as e:
                 # Catch LSP internal error (-32603) and raise a more informative exception
                 if isinstance(e, LSPError) and getattr(e, "code", None) == -32603:
@@ -640,9 +677,11 @@ class SolidLanguageServer(ABC):
             return []
 
         ret: list[ls_types.Location] = []
-        assert isinstance(response, list), f"Unexpected response from Language Server (expected list, got {type(response)}): {response}"
+        assert isinstance(
+            response, list), f"Unexpected response from Language Server (expected list, got {type(response)}): {response}"
         for item in response:
-            assert isinstance(item, dict), f"Unexpected response from Language Server (expected dict, got {type(item)}): {item}"
+            assert isinstance(
+                item, dict), f"Unexpected response from Language Server (expected dict, got {type(item)}): {item}"
             assert LSPConstants.URI in item
             assert LSPConstants.RANGE in item
 
@@ -657,7 +696,8 @@ class SolidLanguageServer(ABC):
 
             rel_path = Path(abs_path).relative_to(self.repository_root_path)
             if self.is_ignored_path(str(rel_path)):
-                self.logger.log(f"Ignoring reference in {rel_path} since it should be ignored", logging.DEBUG)
+                self.logger.log(
+                    f"Ignoring reference in {rel_path} since it should be ignored", logging.DEBUG)
                 continue
 
             new_item: ls_types.Location = {}
@@ -688,7 +728,8 @@ class SolidLanguageServer(ABC):
             response = self.server.send.text_document_diagnostic(
                 {
                     LSPConstants.TEXT_DOCUMENT: {
-                        LSPConstants.URI: pathlib.Path(str(PurePath(self.repository_root_path, relative_file_path))).as_uri()
+                        LSPConstants.URI: pathlib.Path(
+                            str(PurePath(self.repository_root_path, relative_file_path))).as_uri()
                     }
                 }
             )
@@ -696,7 +737,8 @@ class SolidLanguageServer(ABC):
         if response is None:
             return []
 
-        assert isinstance(response, dict), f"Unexpected response from Language Server (expected list, got {type(response)}): {response}"
+        assert isinstance(
+            response, dict), f"Unexpected response from Language Server (expected list, got {type(response)}): {response}"
         ret: list[ls_types.Diagnostic] = []
         for item in response["items"]:
             new_item: ls_types.Diagnostic = {
@@ -756,7 +798,8 @@ class SolidLanguageServer(ABC):
         :return List[multilspy_types.CompletionItem]: A list of completions
         """
         with self.open_file(relative_file_path):
-            open_file_buffer = self.open_file_buffers[pathlib.Path(os.path.join(self.repository_root_path, relative_file_path)).as_uri()]
+            open_file_buffer = self.open_file_buffers[pathlib.Path(
+                os.path.join(self.repository_root_path, relative_file_path)).as_uri()]
             completion_params: LSPTypes.CompletionParams = {
                 "position": {"line": line, "character": column},
                 "textDocument": {"uri": open_file_buffer.uri},
@@ -767,7 +810,8 @@ class SolidLanguageServer(ABC):
             num_retries = 0
             while response is None or (response["isIncomplete"] and num_retries < 30):
                 self.completions_available.wait()
-                response: list[LSPTypes.CompletionItem] | LSPTypes.CompletionList | None = self.server.send.completion(completion_params)
+                response: list[LSPTypes.CompletionItem] | LSPTypes.CompletionList | None = self.server.send.completion(
+                    completion_params)
                 if isinstance(response, list):
                     response = {"items": response, "isIncomplete": False}
                 num_retries += 1
@@ -782,7 +826,8 @@ class SolidLanguageServer(ABC):
             response = cast(list[LSPTypes.CompletionItem], response)
 
             # TODO: Handle the case when the completion is a keyword
-            items = [item for item in response if item["kind"] != LSPTypes.CompletionItemKind.Keyword]
+            items = [item for item in response if item["kind"]
+                     != LSPTypes.CompletionItemKind.Keyword]
 
             completions_list: list[ls_types.CompletionItem] = []
 
@@ -849,20 +894,26 @@ class SolidLanguageServer(ABC):
         cache_key = f"{relative_file_path}-{include_body}"
         with self.open_file(relative_file_path) as file_data:
             with self._cache_lock:
-                file_hash_and_result = self._document_symbols_cache.get(cache_key)
+                file_hash_and_result = self._document_symbols_cache.get(
+                    cache_key)
                 if file_hash_and_result is not None:
                     file_hash, result = file_hash_and_result
                     if file_hash == file_data.content_hash:
-                        self.logger.log(f"Returning cached document symbols for {relative_file_path}", logging.DEBUG)
+                        self.logger.log(
+                            f"Returning cached document symbols for {relative_file_path}", logging.DEBUG)
                         return result
                     else:
-                        self.logger.log(f"Content for {relative_file_path} has changed. Will overwrite in-memory cache", logging.DEBUG)
+                        self.logger.log(
+                            f"Content for {relative_file_path} has changed. Will overwrite in-memory cache", logging.DEBUG)
                 else:
-                    self.logger.log(f"No cache hit for symbols with {include_body=} in {relative_file_path}", logging.DEBUG)
+                    self.logger.log(
+                        f"No cache hit for symbols with {include_body=} in {relative_file_path}", logging.DEBUG)
 
-            self.logger.log(f"Requesting document symbols for {relative_file_path} from the Language Server", logging.DEBUG)
+            self.logger.log(
+                f"Requesting document symbols for {relative_file_path} from the Language Server", logging.DEBUG)
             response = self.server.send.document_symbol(
-                {"textDocument": {"uri": pathlib.Path(os.path.join(self.repository_root_path, relative_file_path)).as_uri()}}
+                {"textDocument": {"uri": pathlib.Path(os.path.join(
+                    self.repository_root_path, relative_file_path)).as_uri()}}
             )
             if response is None:
                 self.logger.log(
@@ -872,7 +923,8 @@ class SolidLanguageServer(ABC):
                     logging.WARNING,
                 )
                 return [], []
-            assert isinstance(response, list), f"Unexpected response from Language Server: {response}"
+            assert isinstance(
+                response, list), f"Unexpected response from Language Server: {response}"
             self.logger.log(
                 f"Received {len(response)} document symbols for {relative_file_path} from the Language Server",
                 logging.DEBUG,
@@ -880,7 +932,8 @@ class SolidLanguageServer(ABC):
 
         def turn_item_into_symbol_with_children(item: GenericDocumentSymbol):
             item = cast(ls_types.UnifiedSymbolInformation, item)
-            absolute_path = os.path.join(self.repository_root_path, relative_file_path)
+            absolute_path = os.path.join(
+                self.repository_root_path, relative_file_path)
 
             # handle missing entries in location
             if "location" not in item:
@@ -944,14 +997,18 @@ class SolidLanguageServer(ABC):
                         l.extend(visit_tree_nodes_and_build_tree_repr(child))
                     return l
 
-                flat_all_symbol_list.extend(visit_tree_nodes_and_build_tree_repr(root_symbol))
+                flat_all_symbol_list.extend(
+                    visit_tree_nodes_and_build_tree_repr(root_symbol))
             else:
-                flat_all_symbol_list.append(ls_types.UnifiedSymbolInformation(**root_symbol))
+                flat_all_symbol_list.append(
+                    ls_types.UnifiedSymbolInformation(**root_symbol))
 
         result = flat_all_symbol_list, root_nodes
-        self.logger.log(f"Caching document symbols for {relative_file_path}", logging.DEBUG)
+        self.logger.log(
+            f"Caching document symbols for {relative_file_path}", logging.DEBUG)
         with self._cache_lock:
-            self._document_symbols_cache[cache_key] = (file_data.content_hash, result)
+            self._document_symbols_cache[cache_key] = (
+                file_data.content_hash, result)
             self._cache_has_changed = True
         return result
 
@@ -977,9 +1034,11 @@ class SolidLanguageServer(ABC):
         :return: A list of root symbols representing the top-level packages/modules in the project.
         """
         if within_relative_path is not None:
-            within_abs_path = os.path.join(self.repository_root_path, within_relative_path)
+            within_abs_path = os.path.join(
+                self.repository_root_path, within_relative_path)
             if not os.path.exists(within_abs_path):
-                raise FileNotFoundError(f"File or directory not found: {within_abs_path}")
+                raise FileNotFoundError(
+                    f"File or directory not found: {within_abs_path}")
             if os.path.isfile(within_abs_path):
                 if self.is_ignored_path(within_relative_path):
                     self.logger.log(
@@ -988,16 +1047,19 @@ class SolidLanguageServer(ABC):
                     )
                     return []
                 else:
-                    _, root_nodes = self.request_document_symbols(within_relative_path, include_body=include_body)
+                    _, root_nodes = self.request_document_symbols(
+                        within_relative_path, include_body=include_body)
                     return root_nodes
 
         # Helper function to recursively process directories
         def process_directory(rel_dir_path: str) -> list[ls_types.UnifiedSymbolInformation]:
-            abs_dir_path = self.repository_root_path if rel_dir_path == "." else os.path.join(self.repository_root_path, rel_dir_path)
+            abs_dir_path = self.repository_root_path if rel_dir_path == "." else os.path.join(
+                self.repository_root_path, rel_dir_path)
             abs_dir_path = os.path.realpath(abs_dir_path)
 
             if self.is_ignored_path(str(Path(abs_dir_path).relative_to(self.repository_root_path))):
-                self.logger.log(f"Skipping directory: {rel_dir_path}\n(because it should be ignored)", logging.DEBUG)
+                self.logger.log(
+                    f"Skipping directory: {rel_dir_path}\n(because it should be ignored)", logging.DEBUG)
                 return []
 
             result = []
@@ -1012,44 +1074,55 @@ class SolidLanguageServer(ABC):
                 kind=ls_types.SymbolKind.Package,
                 location=ls_types.Location(
                     uri=str(pathlib.Path(abs_dir_path).as_uri()),
-                    range={"start": {"line": 0, "character": 0}, "end": {"line": 0, "character": 0}},
+                    range={"start": {"line": 0, "character": 0},
+                           "end": {"line": 0, "character": 0}},
                     absolutePath=str(abs_dir_path),
-                    relativePath=str(Path(abs_dir_path).resolve().relative_to(self.repository_root_path)),
+                    relativePath=str(Path(abs_dir_path).resolve(
+                    ).relative_to(self.repository_root_path)),
                 ),
                 children=[],
             )
             result.append(package_symbol)
 
             for contained_dir_or_file_name in contained_dir_or_file_names:
-                contained_dir_or_file_abs_path = os.path.join(abs_dir_path, contained_dir_or_file_name)
-                contained_dir_or_file_rel_path = str(Path(contained_dir_or_file_abs_path).resolve().relative_to(self.repository_root_path))
+                contained_dir_or_file_abs_path = os.path.join(
+                    abs_dir_path, contained_dir_or_file_name)
+                contained_dir_or_file_rel_path = str(Path(
+                    contained_dir_or_file_abs_path).resolve().relative_to(self.repository_root_path))
                 if self.is_ignored_path(contained_dir_or_file_rel_path):
-                    self.logger.log(f"Skipping item: {contained_dir_or_file_rel_path}\n(because it should be ignored)", logging.DEBUG)
+                    self.logger.log(
+                        f"Skipping item: {contained_dir_or_file_rel_path}\n(because it should be ignored)", logging.DEBUG)
                     continue
 
                 if os.path.isdir(contained_dir_or_file_abs_path):
-                    child_symbols = process_directory(contained_dir_or_file_rel_path)
+                    child_symbols = process_directory(
+                        contained_dir_or_file_rel_path)
                     package_symbol["children"].extend(child_symbols)
                     for child in child_symbols:
                         child["parent"] = package_symbol
 
                 elif os.path.isfile(contained_dir_or_file_abs_path):
-                    _, file_root_nodes = self.request_document_symbols(contained_dir_or_file_rel_path, include_body=include_body)
+                    _, file_root_nodes = self.request_document_symbols(
+                        contained_dir_or_file_rel_path, include_body=include_body)
 
                     # Create file symbol, link with children
-                    file_rel_path = str(Path(contained_dir_or_file_abs_path).resolve().relative_to(self.repository_root_path))
+                    file_rel_path = str(Path(contained_dir_or_file_abs_path).resolve(
+                    ).relative_to(self.repository_root_path))
                     with self.open_file(file_rel_path) as file_data:
-                        fileRange = self._get_range_from_file_content(file_data.contents)
+                        fileRange = self._get_range_from_file_content(
+                            file_data.contents)
                     file_symbol = ls_types.UnifiedSymbolInformation(  # type: ignore
                         name=os.path.splitext(contained_dir_or_file_name)[0],
                         kind=ls_types.SymbolKind.File,
                         range=fileRange,
                         selectionRange=fileRange,
                         location=ls_types.Location(
-                            uri=str(pathlib.Path(contained_dir_or_file_abs_path).as_uri()),
+                            uri=str(pathlib.Path(
+                                contained_dir_or_file_abs_path).as_uri()),
                             range=fileRange,
                             absolutePath=str(contained_dir_or_file_abs_path),
-                            relativePath=str(Path(contained_dir_or_file_abs_path).resolve().relative_to(self.repository_root_path)),
+                            relativePath=str(Path(contained_dir_or_file_abs_path).resolve(
+                            ).relative_to(self.repository_root_path)),
                         ),
                         children=file_root_nodes,
                         parent=package_symbol,
@@ -1067,8 +1140,10 @@ class SolidLanguageServer(ABC):
                                 path = Path(node["location"]["relativePath"])
                                 if path.is_absolute():
                                     try:
-                                        path = path.relative_to(self.repository_root_path)
-                                        node["location"]["relativePath"] = str(path)
+                                        path = path.relative_to(
+                                            self.repository_root_path)
+                                        node["location"]["relativePath"] = str(
+                                            path)
                                     except Exception:
                                         pass
                             if "children" in node:
@@ -1092,21 +1167,35 @@ class SolidLanguageServer(ABC):
         end_column = len(lines[-1])
         return ls_types.Range(start=ls_types.Position(line=0, character=0), end=ls_types.Position(line=end_line, character=end_column))
 
-    def request_dir_overview(self, relative_dir_path: str) -> dict[str, list[UnifiedSymbolInformation]]:
+    def request_dir_overview(self, relative_dir_path: str) -> dict[str, list[tuple[str, ls_types.SymbolKind, int, int]]]:
         """
-        :return: A mapping of all relative paths analyzed to lists of top-level symbols in the corresponding file.
+        An overview of the given directory.
+
+        Maps relative paths of all contained files to info about top-level symbols in the file
+        (name, kind, line, column).
         """
         symbol_tree = self.request_full_symbol_tree(relative_dir_path)
         # Initialize result dictionary
-        result: dict[str, list[UnifiedSymbolInformation]] = defaultdict(list)
+        result: dict[str, list[tuple[str, ls_types.SymbolKind,
+                                     int, int]]] = defaultdict(list)
 
         # Helper function to process a symbol and its children
         def process_symbol(symbol: ls_types.UnifiedSymbolInformation):
             if symbol["kind"] == ls_types.SymbolKind.File:
                 # For file symbols, process their children (top-level symbols)
                 for child in symbol["children"]:
-                    path = Path(child["location"]["absolutePath"]).resolve().relative_to(self.repository_root_path)
-                    result[str(path)].append(child)
+                    assert "location" in child
+                    assert "selectionRange" in child
+                    path = Path(child["location"]["absolutePath"]).resolve(
+                    ).relative_to(self.repository_root_path)
+                    result[str(path)].append(
+                        (
+                            child["name"],
+                            child["kind"],
+                            child["selectionRange"]["start"]["line"],
+                            child["selectionRange"]["start"]["character"],
+                        )
+                    )
             # For package/directory symbols, process their children
             for child in symbol["children"]:
                 process_symbol(child)
@@ -1116,26 +1205,39 @@ class SolidLanguageServer(ABC):
             process_symbol(root)
         return result
 
-    def request_document_overview(self, relative_file_path: str) -> list[UnifiedSymbolInformation]:
+    def request_document_overview(self, relative_file_path: str) -> list[tuple[str, ls_types.SymbolKind, int, int]]:
         """
-        :return: the top-level symbols in the given file.
+        An overview of the given file.
+        Returns the list of tuples (name, kind, line, column) of all top-level symbols in the file.
         """
         _, document_roots = self.request_document_symbols(relative_file_path)
-        return document_roots
+        result = []
+        for root in document_roots:
+            try:
+                result.append(
+                    (root["name"], root["kind"], root["selectionRange"]["start"]
+                     ["line"], root["selectionRange"]["start"]["character"])
+                )
+            except KeyError as e:
+                raise KeyError(
+                    f"Could not process symbol of name {root.get('name', 'unknown')} in {relative_file_path=}") from e
+        return result
 
-    def request_overview(self, within_relative_path: str) -> dict[str, list[UnifiedSymbolInformation]]:
+    def request_overview(self, within_relative_path: str) -> dict[str, list[tuple[str, ls_types.SymbolKind, int, int]]]:
         """
         An overview of all symbols in the given file or directory.
 
         :param within_relative_path: the relative path to the file or directory to get the overview of.
-        :return: A mapping of all relative paths analyzed to lists of top-level symbols in the corresponding file.
+        :return: A mapping of all relative paths analyzed to lists of tuples (name, kind, line, column) of all top-level symbols in the corresponding file.
         """
-        abs_path = (Path(self.repository_root_path) / within_relative_path).resolve()
+        abs_path = (Path(self.repository_root_path) /
+                    within_relative_path).resolve()
         if not abs_path.exists():
             raise FileNotFoundError(f"File or directory not found: {abs_path}")
 
         if abs_path.is_file():
-            symbols_overview = self.request_document_overview(within_relative_path)
+            symbols_overview = self.request_document_overview(
+                within_relative_path)
             return {within_relative_path: symbols_overview}
         else:
             return self.request_dir_overview(within_relative_path)
@@ -1181,9 +1283,11 @@ class SolidLanguageServer(ABC):
         symbol_start_line = symbol["location"]["range"]["start"]["line"]
         symbol_end_line = symbol["location"]["range"]["end"]["line"]
         assert "relativePath" in symbol["location"]
-        symbol_file = self.retrieve_full_file_content(symbol["location"]["relativePath"])
+        symbol_file = self.retrieve_full_file_content(
+            symbol["location"]["relativePath"])
         symbol_lines = symbol_file.split("\n")
-        symbol_body = "\n".join(symbol_lines[symbol_start_line : symbol_end_line + 1])
+        symbol_body = "\n".join(
+            symbol_lines[symbol_start_line: symbol_end_line + 1])
 
         # remove leading indentation
         symbol_start_column = symbol["location"]["range"]["start"]["character"]
@@ -1240,7 +1344,8 @@ class SolidLanguageServer(ABC):
 
             with self.open_file(ref_path) as file_data:
                 # Get the containing symbol for this reference
-                containing_symbol = self.request_containing_symbol(ref_path, ref_line, ref_col, include_body=include_body)
+                containing_symbol = self.request_containing_symbol(
+                    ref_path, ref_line, ref_col, include_body=include_body)
                 if containing_symbol is None:
                     # TODO: HORRIBLE HACK! I don't know how to do it better for now...
                     # THIS IS BOUND TO BREAK IN MANY CASES! IT IS ALSO SPECIFIC TO PYTHON!
@@ -1258,7 +1363,8 @@ class SolidLanguageServer(ABC):
                     ref_text = file_data.contents.split("\n")[ref_line]
                     if "." in ref_text:
                         containing_symbol_name = ref_text.split(".")[0]
-                        all_symbols, _ = self.request_document_symbols(ref_path)
+                        all_symbols, _ = self.request_document_symbols(
+                            ref_path)
                         for symbol in all_symbols:
                             if symbol["name"] == containing_symbol_name and symbol["kind"] == ls_types.SymbolKind.Variable:
                                 containing_symbol = copy(symbol)
@@ -1272,11 +1378,14 @@ class SolidLanguageServer(ABC):
                         f"Could not find containing symbol for {ref_path}:{ref_line}:{ref_col}. Returning file symbol instead",
                         logging.WARNING,
                     )
-                    fileRange = self._get_range_from_file_content(file_data.contents)
+                    fileRange = self._get_range_from_file_content(
+                        file_data.contents)
                     location = ls_types.Location(
-                        uri=str(pathlib.Path(os.path.join(self.repository_root_path, ref_path)).as_uri()),
+                        uri=str(pathlib.Path(os.path.join(
+                            self.repository_root_path, ref_path)).as_uri()),
                         range=fileRange,
-                        absolutePath=str(os.path.join(self.repository_root_path, ref_path)),
+                        absolutePath=str(os.path.join(
+                            self.repository_root_path, ref_path)),
                         relativePath=ref_path,
                     )
                     name = os.path.splitext(os.path.basename(ref_path))[0]
@@ -1309,9 +1418,11 @@ class SolidLanguageServer(ABC):
                 ):
                     incoming_symbol = containing_symbol
                     if include_self:
-                        result.append(ReferenceInSymbol(symbol=containing_symbol, line=ref_line, character=ref_col))
+                        result.append(ReferenceInSymbol(
+                            symbol=containing_symbol, line=ref_line, character=ref_col))
                         continue
-                    self.logger.log(f"Found self-reference for {incoming_symbol['name']}, skipping it since {include_self=}", logging.DEBUG)
+                    self.logger.log(
+                        f"Found self-reference for {incoming_symbol['name']}, skipping it since {include_self=}", logging.DEBUG)
                     continue
 
                 # checking whether reference is an import
@@ -1331,7 +1442,8 @@ class SolidLanguageServer(ABC):
                     )
                     continue
 
-                result.append(ReferenceInSymbol(symbol=containing_symbol, line=ref_line, character=ref_col))
+                result.append(ReferenceInSymbol(
+                    symbol=containing_symbol, line=ref_line, character=ref_col))
 
         return result
 
@@ -1371,7 +1483,8 @@ class SolidLanguageServer(ABC):
         """
         # checking if the line is empty, unfortunately ugly and duplicating code, but I don't want to refactor
         with self.open_file(relative_file_path):
-            absolute_file_path = str(PurePath(self.repository_root_path, relative_file_path))
+            absolute_file_path = str(
+                PurePath(self.repository_root_path, relative_file_path))
             content = FileUtils.read_file(self.logger, absolute_file_path)
             if content.split("\n")[line].strip() == "":
                 self.logger.log(
@@ -1403,7 +1516,8 @@ class SolidLanguageServer(ABC):
                 location["uri"] = Path(absolute_file_path).as_uri()
 
         # Allowed container kinds, currently only for Python
-        container_symbol_kinds = {ls_types.SymbolKind.Method, ls_types.SymbolKind.Function, ls_types.SymbolKind.Class}
+        container_symbol_kinds = {ls_types.SymbolKind.Method,
+                                  ls_types.SymbolKind.Function, ls_types.SymbolKind.Class}
 
         def is_position_in_range(line: int, range_d: ls_types.Range) -> bool:
             start = range_d["start"]
@@ -1426,7 +1540,8 @@ class SolidLanguageServer(ABC):
             for s in symbols
             if s["kind"] in container_symbol_kinds and s["location"]["range"]["start"]["line"] != s["location"]["range"]["end"]["line"]
         ]
-        var_containers = [s for s in symbols if s["kind"] == ls_types.SymbolKind.Variable]
+        var_containers = [s for s in symbols if s["kind"]
+                          == ls_types.SymbolKind.Variable]
         candidate_containers.extend(var_containers)
 
         if not candidate_containers:
@@ -1442,9 +1557,11 @@ class SolidLanguageServer(ABC):
 
         if containing_symbols:
             # Return the one with the greatest starting position (i.e. the innermost container).
-            containing_symbol = max(containing_symbols, key=lambda s: s["location"]["range"]["start"]["line"])
+            containing_symbol = max(
+                containing_symbols, key=lambda s: s["location"]["range"]["start"]["line"])
             if include_body:
-                containing_symbol["body"] = self.retrieve_symbol_body(containing_symbol)
+                containing_symbol["body"] = self.retrieve_symbol_body(
+                    containing_symbol)
             return containing_symbol
         else:
             return None
@@ -1509,7 +1626,8 @@ class SolidLanguageServer(ABC):
         def_col = definition["range"]["start"]["character"]
 
         # Find the symbol at or containing this location
-        defining_symbol = self.request_containing_symbol(def_path, def_line, def_col, strict=False, include_body=include_body)
+        defining_symbol = self.request_containing_symbol(
+            def_path, def_line, def_col, strict=False, include_body=include_body)
 
         return defining_symbol
 
@@ -1518,7 +1636,15 @@ class SolidLanguageServer(ABC):
         """
         The path to the cache file for the document symbols.
         """
-        return (
+        if self._base_memory_path:
+            # Extract project name from repository_root_path
+            project_name = Path(self.repository_root_path).name
+            # Construct path: base_memory_path/project_name/foundation/cache/language_id/cache_file
+            return (Path(self._base_memory_path) / project_name / "foundation" / self.CACHE_FOLDER_NAME /
+                    self.language_id / "document_symbols_cache_v23-06-25.pkl")
+        else:
+            # Default behavior
+            return (
             Path(self.repository_root_path)
             / self._solidlsp_settings.project_data_relative_path
             / self.CACHE_FOLDER_NAME
@@ -1529,10 +1655,12 @@ class SolidLanguageServer(ABC):
     def save_cache(self):
         with self._cache_lock:
             if not self._cache_has_changed:
-                self.logger.log("No changes to document symbols cache, skipping save", logging.DEBUG)
+                self.logger.log(
+                    "No changes to document symbols cache, skipping save", logging.DEBUG)
                 return
 
-            self.logger.log(f"Saving updated document symbols cache to {self.cache_path}", logging.INFO)
+            self.logger.log(
+                f"Saving updated document symbols cache to {self.cache_path}", logging.INFO)
             self.cache_path.parent.mkdir(parents=True, exist_ok=True)
             try:
                 with open(self.cache_path, "wb") as f:
@@ -1550,11 +1678,13 @@ class SolidLanguageServer(ABC):
             return
 
         with self._cache_lock:
-            self.logger.log(f"Loading document symbols cache from {self.cache_path}", logging.INFO)
+            self.logger.log(
+                f"Loading document symbols cache from {self.cache_path}", logging.INFO)
             try:
                 with open(self.cache_path, "rb") as f:
                     self._document_symbols_cache = pickle.load(f)
-                self.logger.log(f"Loaded {len(self._document_symbols_cache)} document symbols from cache.", logging.INFO)
+                self.logger.log(
+                    f"Loaded {len(self._document_symbols_cache)} document symbols from cache.", logging.INFO)
             except Exception as e:
                 # cache often becomes corrupt, so just skip loading it
                 self.logger.log(

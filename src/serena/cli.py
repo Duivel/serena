@@ -33,7 +33,6 @@ from serena.project import Project
 from serena.tools import FindReferencingSymbolsTool, FindSymbolTool, GetSymbolsOverviewTool, SearchForPatternTool, ToolRegistry
 from serena.util.logging import MemoryLogHandler
 from solidlsp.ls_config import Language
-from solidlsp.util.subprocess_util import subprocess_kwargs
 
 log = logging.getLogger(__name__)
 
@@ -43,19 +42,18 @@ log = logging.getLogger(__name__)
 def _open_in_editor(path: str) -> None:
     """Open the given file in the system's default editor or viewer."""
     editor = os.environ.get("EDITOR")
-    run_kwargs = subprocess_kwargs()
     try:
         if editor:
-            subprocess.run([editor, path], check=False, **run_kwargs)
+            subprocess.run([editor, path], check=False)
         elif sys.platform.startswith("win"):
             try:
                 os.startfile(path)
             except OSError:
-                subprocess.run(["notepad.exe", path], check=False, **run_kwargs)
+                subprocess.run(["notepad.exe", path], check=False)
         elif sys.platform == "darwin":
-            subprocess.run(["open", path], check=False, **run_kwargs)
+            subprocess.run(["open", path], check=False)
         else:
-            subprocess.run(["xdg-open", path], check=False, **run_kwargs)
+            subprocess.run(["xdg-open", path], check=False)
     except Exception as e:
         print(f"Failed to open {path}: {e}")
 
@@ -100,7 +98,8 @@ class TopLevelCommands(AutoRegisteringGroup):
     """Root CLI group containing the core Serena commands."""
 
     def __init__(self) -> None:
-        super().__init__(name="serena", help="Serena CLI commands. You can run `<command> --help` for more info on each command.")
+        super().__init__(name="serena",
+                         help="Serena CLI commands. You can run `<command> --help` for more info on each command.")
 
     @staticmethod
     @click.command("start-mcp-server", help="Starts the Serena MCP server.")
@@ -138,6 +137,7 @@ class TopLevelCommands(AutoRegisteringGroup):
     )
     @click.option("--trace-lsp-communication", type=bool, is_flag=False, default=None, help="Whether to trace LSP communication.")
     @click.option("--tool-timeout", type=float, default=None, help="Override tool execution timeout in config.")
+    @click.option("--memory-path", type=str, default=None, help="Base path for memory storage. The final path will be: {base_path}/{project_name}/foundation. If not specified, uses the default project-based location.")
     def start_mcp_server(
         project: str | None,
         project_file_arg: str | None,
@@ -151,6 +151,7 @@ class TopLevelCommands(AutoRegisteringGroup):
         log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] | None,
         trace_lsp_communication: bool | None,
         tool_timeout: float | None,
+        memory_path: str | None,
     ) -> None:
         # initialize logging, using INFO level initially (will later be adjusted by SerenaAgent according to the config)
         #   * memory log handler (for use by GUI/Dashboard)
@@ -172,7 +173,8 @@ class TopLevelCommands(AutoRegisteringGroup):
         log.info("Initializing Serena MCP server")
         log.info("Storing logs in %s", log_path)
         project_file = project_file_arg or project
-        factory = SerenaMCPFactorySingleProcess(context=context, project=project_file, memory_log_handler=memory_log_handler)
+        factory = SerenaMCPFactorySingleProcess(
+            context=context, project=project_file, memory_log_handler=memory_log_handler, memory_path=memory_path)
         server = factory.create_mcp_server(
             host=host,
             port=port,
@@ -240,16 +242,19 @@ class ModeCommands(AutoRegisteringGroup):
     """Group for 'mode' subcommands."""
 
     def __init__(self) -> None:
-        super().__init__(name="mode", help="Manage Serena modes. You can run `mode <command> --help` for more info on each command.")
+        super().__init__(name="mode",
+                         help="Manage Serena modes. You can run `mode <command> --help` for more info on each command.")
 
     @staticmethod
     @click.command("list", help="List available modes.")
     def list() -> None:
         mode_names = SerenaAgentMode.list_registered_mode_names()
-        max_len_name = max(len(name) for name in mode_names) if mode_names else 20
+        max_len_name = max(len(name)
+                           for name in mode_names) if mode_names else 20
         for name in mode_names:
             mode_yml_path = SerenaAgentMode.get_path(name)
-            is_internal = Path(mode_yml_path).is_relative_to(SERENAS_OWN_MODE_YAMLS_DIR)
+            is_internal = Path(mode_yml_path).is_relative_to(
+                SERENAS_OWN_MODE_YAMLS_DIR)
             descriptor = "(internal)" if is_internal else f"(at {mode_yml_path})"
             name_descr_string = f"{name:<{max_len_name + 4}}{descriptor}"
             click.echo(name_descr_string)
@@ -266,7 +271,8 @@ class ModeCommands(AutoRegisteringGroup):
     @click.option("--from-internal", "from_internal", type=str, default=None, help="Copy from an internal mode.")
     def create(name: str, from_internal: str) -> None:
         if not (name or from_internal):
-            raise click.UsageError("Provide at least one of --name or --from-internal.")
+            raise click.UsageError(
+                "Provide at least one of --name or --from-internal.")
         mode_name = name or from_internal
         dest = os.path.join(USER_MODE_YAMLS_DIR, f"{mode_name}.yml")
         src = (
@@ -295,7 +301,8 @@ class ModeCommands(AutoRegisteringGroup):
                     f"Use 'mode create --from-internal {mode_name}' to create a custom mode that overrides it before editing."
                 )
             else:
-                click.echo(f"Custom mode '{mode_name}' not found. Create it with: mode create --name {mode_name}.")
+                click.echo(
+                    f"Custom mode '{mode_name}' not found. Create it with: mode create --name {mode_name}.")
             return
         _open_in_editor(path)
 
@@ -323,10 +330,12 @@ class ContextCommands(AutoRegisteringGroup):
     @click.command("list", help="List available contexts.")
     def list() -> None:
         context_names = SerenaAgentContext.list_registered_context_names()
-        max_len_name = max(len(name) for name in context_names) if context_names else 20
+        max_len_name = max(len(name)
+                           for name in context_names) if context_names else 20
         for name in context_names:
             context_yml_path = SerenaAgentContext.get_path(name)
-            is_internal = Path(context_yml_path).is_relative_to(SERENAS_OWN_CONTEXT_YAMLS_DIR)
+            is_internal = Path(context_yml_path).is_relative_to(
+                SERENAS_OWN_CONTEXT_YAMLS_DIR)
             descriptor = "(internal)" if is_internal else f"(at {context_yml_path})"
             name_descr_string = f"{name:<{max_len_name + 4}}{descriptor}"
             click.echo(name_descr_string)
@@ -343,7 +352,8 @@ class ContextCommands(AutoRegisteringGroup):
     @click.option("--from-internal", "from_internal", type=str, default=None, help="Copy from an internal context.")
     def create(name: str, from_internal: str) -> None:
         if not (name or from_internal):
-            raise click.UsageError("Provide at least one of --name or --from-internal.")
+            raise click.UsageError(
+                "Provide at least one of --name or --from-internal.")
         ctx_name = name or from_internal
         dest = os.path.join(USER_CONTEXT_YAMLS_DIR, f"{ctx_name}.yml")
         src = (
@@ -372,7 +382,8 @@ class ContextCommands(AutoRegisteringGroup):
                     f"Use 'context create --from-internal {context_name}' to create a custom context that overrides it before editing."
                 )
             else:
-                click.echo(f"Custom context '{context_name}' not found. Create it with: context create --name {context_name}.")
+                click.echo(
+                    f"Custom context '{context_name}' not found. Create it with: context create --name {context_name}.")
             return
         _open_in_editor(path)
 
@@ -399,7 +410,8 @@ class SerenaConfigCommands(AutoRegisteringGroup):
         "edit", help="Edit serena_config.yml in your default editor. Will create a config file from the template if no config is found."
     )
     def edit() -> None:
-        config_path = os.path.join(SERENA_MANAGED_DIR_IN_HOME, "serena_config.yml")
+        config_path = os.path.join(
+            SERENA_MANAGED_DIR_IN_HOME, "serena_config.yml")
         if not os.path.exists(config_path):
             SerenaConfig.generate_config_file(config_path)
         _open_in_editor(config_path)
@@ -417,19 +429,35 @@ class ProjectCommands(AutoRegisteringGroup):
     @click.command("generate-yml", help="Generate a project.yml file.")
     @click.argument("project_path", type=click.Path(exists=True, file_okay=False), default=os.getcwd())
     @click.option("--language", type=str, default=None, help="Programming language; inferred if not specified.")
-    def generate_yml(project_path: str, language: str | None = None) -> None:
-        yml_path = os.path.join(project_path, ProjectConfig.rel_path_to_project_yml())
+    @click.option("--memory-path", type=str, default=None, help="Base path for memory storage. If specified, project.yml will be created in memory path structure.")
+    def generate_yml(project_path: str, language: str | None = None, memory_path: str | None = None) -> None:
+        if memory_path is not None:
+            yml_path = ProjectConfig.rel_path_to_project_yml(
+                memory_path, project_path)
+        else:
+            yml_path = os.path.join(
+                project_path, ProjectConfig.rel_path_to_project_yml())
+
         if os.path.exists(yml_path):
             raise FileExistsError(f"Project file {yml_path} already exists.")
+
         lang_inst = None
         if language:
             try:
                 lang_inst = Language[language.upper()]
             except KeyError:
-                all_langs = [l.name.lower() for l in Language.iter_all(include_experimental=True)]
-                raise ValueError(f"Unknown language '{language}'. Supported: {all_langs}")
-        generated_conf = ProjectConfig.autogenerate(project_root=project_path, project_language=lang_inst)
-        print(f"Generated project.yml with language {generated_conf.language.value} at {yml_path}.")
+                all_langs = [l.name.lower()
+                             for l in Language.iter_all(include_experimental=True)]
+                raise ValueError(
+                    f"Unknown language '{language}'. Supported: {all_langs}")
+
+        generated_conf = ProjectConfig.autogenerate(
+            project_root=project_path,
+            project_language=lang_inst,
+            base_memory_path=memory_path
+        )
+        print(
+            f"Generated project.yml with language {generated_conf.language.value} at {yml_path}.")
 
     @staticmethod
     @click.command("index", help="Index a project by saving symbols to the LSP cache.")
@@ -686,26 +714,15 @@ class ToolCommands(AutoRegisteringGroup):
         )
 
     @staticmethod
-    @click.command(
-        "list",
-        help="Prints an overview of the tools that are active by default (not just the active ones for your project). For viewing all tools, pass `--all / -a`",
-    )
+    @click.command("list", help="Prints an overview of all tools implemented in Serena (not just the active ones for your project).")
     @click.option("--quiet", "-q", is_flag=True)
-    @click.option("--all", "-a", "include_optional", is_flag=True, help="List all tools, including those not enabled by default.")
-    @click.option("--only-optional", is_flag=True, help="List only optional tools (those not enabled by default).")
-    def list(quiet: bool = False, include_optional: bool = False, only_optional: bool = False) -> None:
+    def list(quiet: bool = False) -> None:
         tool_registry = ToolRegistry()
         if quiet:
-            if only_optional:
-                tool_names = tool_registry.get_tool_names_optional()
-            elif include_optional:
-                tool_names = tool_registry.get_tool_names()
-            else:
-                tool_names = tool_registry.get_tool_names_default_enabled()
-            for tool_name in tool_names:
+            for tool_name in tool_registry.get_tool_names_default_enabled():
                 click.echo(tool_name)
         else:
-            ToolRegistry().print_tool_overview(include_optional=include_optional, only_optional=only_optional)
+            ToolRegistry().print_tool_overview()
 
     @staticmethod
     @click.command(

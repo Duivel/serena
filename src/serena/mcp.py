@@ -315,20 +315,22 @@ class SerenaMCPFactorySingleProcess(SerenaMCPFactory):
     MCP server factory where the SerenaAgent and its language server run in the same process as the MCP server
     """
 
-    def __init__(self, context: str = DEFAULT_CONTEXT, project: str | None = None, memory_log_handler: MemoryLogHandler | None = None):
+    def __init__(self, context: str = DEFAULT_CONTEXT, project: str | None = None, memory_log_handler: MemoryLogHandler | None = None, memory_path: str | None = None):
         """
         :param context: The context name or path to context file
         :param project: Either an absolute path to the project directory or a name of an already registered project.
             If the project passed here hasn't been registered yet, it will be registered automatically and can be activated by its name
             afterward.
+        :param memory_path: Custom path for memory storage. If not specified, uses the default project-based location.
         """
         super().__init__(context=context, project=project)
         self.agent: SerenaAgent | None = None
         self.memory_log_handler = memory_log_handler
+        self.memory_path = memory_path
 
     def _instantiate_agent(self, serena_config: SerenaConfig, modes: list[SerenaAgentMode]) -> None:
         self.agent = SerenaAgent(
-            project=self.project, serena_config=serena_config, context=self.context, modes=modes, memory_log_handler=self.memory_log_handler
+            project=self.project, serena_config=serena_config, context=self.context, modes=modes, memory_log_handler=self.memory_log_handler, memory_path=self.memory_path
         )
 
     def _iter_tools(self) -> Iterator[Tool]:
