@@ -175,7 +175,7 @@ class ProjectConfig(ToolInclusionDefinition, ToStringMixin):
 
     @classmethod
     def autogenerate(
-        cls, project_root: str | Path, project_name: str | None = None, project_language: Language | None = None, save_to_disk: bool = True
+        cls, project_root: str | Path, project_name: str | None = None, project_language: Language | None = None, save_to_disk: bool = True, base_memory_path: str | None = None
     ) -> Self:
         """
         Autogenerate a project configuration for a given project root.
@@ -185,6 +185,7 @@ class ProjectConfig(ToolInclusionDefinition, ToStringMixin):
             containing the project
         :param project_language: the programming language of the project; if None, it will be determined automatically
         :param save_to_disk: whether to save the project configuration to disk
+        :param base_memory_path: custom base path for memory storage
         :return: the project configuration
         """
         project_root = Path(project_root).resolve()
@@ -209,16 +210,38 @@ class ProjectConfig(ToolInclusionDefinition, ToStringMixin):
                 dominant_language = max(language_composition.keys(), key=lambda lang: language_composition[lang])
             else:
                 dominant_language = project_language.value
-            config_with_comments = load_yaml(PROJECT_TEMPLATE_FILE, preserve_comments=True)
+            config_with_comments = load_yaml(
+                PROJECT_TEMPLATE_FILE, preserve_comments=True)
             config_with_comments["project_name"] = project_name
             config_with_comments["language"] = dominant_language
             if save_to_disk:
-                save_yaml(str(project_root / cls.rel_path_to_project_yml()), config_with_comments, preserve_comments=True)
+                if base_memory_path is not None:
+                    config_path = Path(cls.rel_path_to_project_yml(
+                        base_memory_path, str(project_root)))
+                    config_path.parent.mkdir(parents=True, exist_ok=True)
+                else:
+                    config_path = project_root / cls.rel_path_to_project_yml()
+                save_yaml(str(config_path), config_with_comments,
+                          preserve_comments=True)
             return cls._from_dict(config_with_comments)
 
     @classmethod
-    def rel_path_to_project_yml(cls) -> str:
-        return os.path.join(SERENA_MANAGED_DIR_NAME, cls.SERENA_DEFAULT_PROJECT_FILE)
+    def rel_path_to_project_yml(cls, base_memory_path: str | None = None, project_root: str | None = None) -> str:
+        """
+        Get the relative path to project.yml file.
+
+        :param base_memory_path: Custom base path for memory storage
+        :param project_root: Project root directory (required when using base_memory_path)
+        :return: Path to project.yml file
+        """
+        if base_memory_path is not None and project_root is not None:
+            # Extract project name from project_root
+            project_name = Path(project_root).name
+            # Construct final path: base_path + project_name + "foundation" + project.yml
+            return str(Path(base_memory_path) / project_name / "foundation" / cls.SERENA_DEFAULT_PROJECT_FILE)
+        else:
+            # Default behavior
+            return os.path.join(SERENA_MANAGED_DIR_NAME, cls.SERENA_DEFAULT_PROJECT_FILE)
 
     @classmethod
     def _from_dict(cls, data: dict[str, Any]) -> Self:
@@ -248,15 +271,25 @@ class ProjectConfig(ToolInclusionDefinition, ToStringMixin):
         )
 
     @classmethod
-    def load(cls, project_root: Path | str, autogenerate: bool = False) -> Self:
+    def load(cls, project_root: Path | str, autogenerate: bool = False, base_memory_path: str | None = None) -> Self:
         """
         Load a ProjectConfig instance from the path to the project root.
+
+        :param project_root: the path to the project root
+        :param autogenerate: whether to autogenerate the project configuration if it doesn't exist
+        :param base_memory_path: custom base path for memory storage
         """
         project_root = Path(project_root)
-        yaml_path = project_root / cls.rel_path_to_project_yml()
+
+        if base_memory_path is not None:
+            yaml_path = Path(cls.rel_path_to_project_yml(
+                base_memory_path, str(project_root)))
+        else:
+            yaml_path = project_root / cls.rel_path_to_project_yml()
+
         if not yaml_path.exists():
             if autogenerate:
-                return cls.autogenerate(project_root)
+                return cls.autogenerate(project_root, base_memory_path=base_memory_path)
             else:
                 raise FileNotFoundError(f"Project configuration file not found: {yaml_path}")
         with open(yaml_path, encoding="utf-8") as f:
@@ -447,16 +480,25 @@ class SerenaConfig(ToolInclusionDefinition, ToStringMixin):
         if is_running_in_docker():
             instance.gui_log_window_enabled = False  # not supported in Docker
         else:
-            instance.gui_log_window_enabled = loaded_commented_yaml.get("gui_log_window", False)
-        instance.log_level = loaded_commented_yaml.get("log_level", loaded_commented_yaml.get("gui_log_level", logging.INFO))
-        instance.web_dashboard = loaded_commented_yaml.get("web_dashboard", True)
-        instance.web_dashboard_open_on_launch = loaded_commented_yaml.get("web_dashboard_open_on_launch", True)
-        instance.tool_timeout = loaded_commented_yaml.get("tool_timeout", DEFAULT_TOOL_TIMEOUT)
-        instance.trace_lsp_communication = loaded_commented_yaml.get("trace_lsp_communication", False)
-        instance.excluded_tools = loaded_commented_yaml.get("excluded_tools", [])
-        instance.included_optional_tools = loaded_commented_yaml.get("included_optional_tools", [])
+            instance.gui_log_window_enabled = loaded_commented_yaml.get(
+                "gui_log_window", False)
+        instance.log_level = loaded_commented_yaml.get(
+            "log_level", loaded_commented_yaml.get("gui_log_level", logging.INFO))
+        instance.web_dashboard = loaded_commented_yaml.get(
+            "web_dashboard", True)
+        instance.web_dashboard_open_on_launch = loaded_commented_yaml.get(
+            "web_dashboard_open_on_launch", True)
+        instance.tool_timeout = loaded_commented_yaml.get(
+            "tool_timeout", DEFAULT_TOOL_TIMEOUT)
+        instance.trace_lsp_communication = loaded_commented_yaml.get(
+            "trace_lsp_communication", False)
+        instance.excluded_tools = loaded_commented_yaml.get(
+            "excluded_tools", [])
+        instance.included_optional_tools = loaded_commented_yaml.get(
+            "included_optional_tools", [])
         instance.jetbrains = loaded_commented_yaml.get("jetbrains", False)
-        instance.record_tool_usage_stats = loaded_commented_yaml.get("record_tool_usage_stats", False)
+        instance.record_tool_usage_stats = loaded_commented_yaml.get(
+            "record_tool_usage_stats", False)
         instance.token_count_estimator = loaded_commented_yaml.get(
             "token_count_estimator", RegisteredTokenCountEstimator.TIKTOKEN_GPT4O.name
         )
@@ -481,7 +523,8 @@ class SerenaConfig(ToolInclusionDefinition, ToStringMixin):
         :param path: the path to the legacy project configuration file
         :return: the project root path if the migration was successful, None otherwise.
         """
-        log.info(f"Found legacy project configuration file {path}, migrating to in-project configuration.")
+        log.info(
+            f"Found legacy project configuration file {path}, migrating to in-project configuration.")
         try:
             with open(path, encoding="utf-8") as f:
                 project_config_data = yaml.safe_load(f)
@@ -490,7 +533,8 @@ class SerenaConfig(ToolInclusionDefinition, ToStringMixin):
                 with open(path, "a", encoding="utf-8") as f:
                     f.write(f"\nproject_name: {project_name}")
             project_root = project_config_data["project_root"]
-            shutil.move(str(path), str(Path(project_root) / ProjectConfig.rel_path_to_project_yml()))
+            shutil.move(str(path), str(Path(project_root) /
+                        ProjectConfig.rel_path_to_project_yml()))
             return Path(project_root).resolve()
         except Exception as e:
             log.error(f"Error migrating configuration file: {e}")
@@ -524,21 +568,24 @@ class SerenaConfig(ToolInclusionDefinition, ToStringMixin):
                     return project.get_project_instance()
         return None
 
-    def add_project_from_path(self, project_root: Path | str) -> "Project":
+    def add_project_from_path(self, project_root: Path | str, base_memory_path: str | None = None) -> "Project":
         """
         Add a project to the Serena configuration from a given path. Will raise a FileExistsError if a
         project already exists at the path.
 
         :param project_root: the path to the project to add
+        :param base_memory_path: custom base path for memory storage
         :return: the project that was added
         """
         from ..project import Project
 
         project_root = Path(project_root).resolve()
         if not project_root.exists():
-            raise FileNotFoundError(f"Error: Path does not exist: {project_root}")
+            raise FileNotFoundError(
+                f"Error: Path does not exist: {project_root}")
         if not project_root.is_dir():
-            raise FileNotFoundError(f"Error: Path is not a directory: {project_root}")
+            raise FileNotFoundError(
+                f"Error: Path is not a directory: {project_root}")
 
         for already_registered_project in self.projects:
             if str(already_registered_project.project_root) == str(project_root):
@@ -546,10 +593,13 @@ class SerenaConfig(ToolInclusionDefinition, ToStringMixin):
                     f"Project with path {project_root} was already added with name '{already_registered_project.project_name}'."
                 )
 
-        project_config = ProjectConfig.load(project_root, autogenerate=True)
+        project_config = ProjectConfig.load(
+            project_root, autogenerate=True, base_memory_path=base_memory_path)
 
-        new_project = Project(project_root=str(project_root), project_config=project_config, is_newly_created=True)
-        self.projects.append(RegisteredProject.from_project_instance(new_project))
+        new_project = Project(project_root=str(
+            project_root), project_config=project_config, is_newly_created=True)
+        self.projects.append(
+            RegisteredProject.from_project_instance(new_project))
         self.save()
 
         return new_project
@@ -561,7 +611,8 @@ class SerenaConfig(ToolInclusionDefinition, ToStringMixin):
                 del self.projects[i]
                 break
         else:
-            raise ValueError(f"Project '{project_name}' not found in Serena configuration; valid project names: {self.project_names}")
+            raise ValueError(
+                f"Project '{project_name}' not found in Serena configuration; valid project names: {self.project_names}")
         self.save()
 
     def save(self) -> None:
@@ -574,5 +625,7 @@ class SerenaConfig(ToolInclusionDefinition, ToStringMixin):
         loaded_original_yaml = deepcopy(self.loaded_commented_yaml)
         # projects are unique absolute paths
         # we also canonicalize them before saving
-        loaded_original_yaml["projects"] = sorted({str(project.project_root) for project in self.projects})
-        save_yaml(self.config_file_path, loaded_original_yaml, preserve_comments=True)
+        loaded_original_yaml["projects"] = sorted(
+            {str(project.project_root) for project in self.projects})
+        save_yaml(self.config_file_path, loaded_original_yaml,
+                  preserve_comments=True)
